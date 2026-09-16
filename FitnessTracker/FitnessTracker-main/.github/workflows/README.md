@@ -1,0 +1,265 @@
+# GitHub Actions Workflows
+
+This directory contains all GitHub Actions workflows for the SparkyFitness project.
+
+## Workflows Overview
+
+### CI/CD Workflows
+
+#### `ci-tests.yml`
+
+**Purpose**: Run automated tests for Frontend, Backend, Mobile, and Garmin components.
+
+**Triggers**: Pull requests and pushes to `main` branch
+
+**What it does**:
+
+- Detects which components changed using path filters
+- Runs component-specific test suites:
+  - **Frontend**: `pnpm run validate` + `pnpm run test:ci` (type check, lint, format, tests)
+  - **Backend**: Format check, lint, tests (currently disabled)
+  - **Mobile**: Lint + `pnpm run test:ci`
+  - **Garmin**: Python pytest with coverage
+- Uploads coverage reports as artifacts
+
+**Note**: Backend tests are currently disabled (`if: false`) per maintainer request.
+
+---
+
+#### `pr-validation.yml`
+
+**Purpose**: Validate that PR submissions follow contribution guidelines and required checkboxes are checked.
+
+**Triggers**: Pull request activity, submitted/dismissed reviews, and created/deleted review comments
+
+**What it does**:
+
+- Analyzes changed files to detect Frontend, Backend, Mobile, and UI changes
+- Validates required checkboxes based on change type:
+  - **All PRs**: Integrity & License checkbox
+  - **New Features**: Alignment checkbox (issue approval)
+  - **Frontend Changes**: Quality checkbox (`pnpm run validate`)
+  - **Backend Changes**: Code Quality checkbox (TypeScript, Zod, Tests)
+  - **UI Changes**: Screenshots checkbox with before/after images
+- Posts validation results as a comment on the PR
+- Fails the check if required checkboxes are missing
+- Updates the same comment on subsequent edits (no spam)
+
+Review events from forks have read-only tokens. They still validate the checklist and unresolved review conversations, with results in the job summary. Labels, checklist restoration, and the PR validation comment are updated only on `pull_request_target` events. Review runs cannot cancel those updates, and policy rules are always loaded from the PR base.
+
+**Change Detection Logic**:
+
+```javascript
+hasFrontendChanges = files in SparkyFitnessFrontend/ or src/
+hasBackendChanges = files in SparkyFitnessServer/
+hasMobileChanges = files in SparkyFitnessMobile/
+hasUIChanges = .tsx/.jsx/.css files in components/screens/pages/
+```
+
+**Validation Rules**:
+
+- ❌ **ERRORS** (fail the check):
+  - Missing "Integrity & License" checkbox (ALL)
+  - Missing "Alignment" checkbox (NEW FEATURES)
+  - Missing "Quality" checkbox (FRONTEND)
+  - Missing "Code Quality" checkbox (BACKEND)
+- ⚠️ **WARNINGS** (informational):
+  - Missing "Screenshots" checkbox (UI)
+  - Missing/incomplete screenshots sections
+  - Missing description
+  - Missing linked issue
+
+**Important**: This workflow prevents contributors from removing checkboxes. If checkboxes are removed, the validation fails.
+
+---
+
+### Deployment Workflows
+
+#### `auto-docker-deploy.yml`
+
+**Purpose**: Automatically deploy Docker images on version tag pushes
+
+**Triggers**: Push of tags matching `v*.*.*`
+
+---
+
+#### `manual-docker-deploy.yml`
+
+**Purpose**: Manual Docker deployment workflow
+
+**Triggers**: Manual workflow dispatch
+
+---
+
+#### `helm-release.yml`
+
+**Purpose**: Create Helm chart releases
+
+**Triggers**: Release publication
+
+---
+
+### Documentation Workflows
+
+#### `docs-test.yml`
+
+**Purpose**: Test documentation builds on PRs
+
+**Triggers**: Pull requests affecting `docs/` directory
+
+---
+
+#### `docs-deploy.yml`
+
+**Purpose**: Deploy documentation to GitHub Pages
+
+**Triggers**: Pushes to `main` affecting `docs/` directory
+
+---
+
+### Platform-Specific Workflows
+
+#### `android.yml`
+
+**Purpose**: Android-specific builds and tests
+
+**Triggers**: TBD (check workflow file for specific triggers)
+
+---
+
+#### `release-assets.yml`
+
+**Purpose**: Create release assets for published releases
+
+**Triggers**: Release publication
+
+---
+
+### Issue & PR Management Workflows
+
+#### `issue-auto-label.yml`
+
+**Purpose**: Automatically label newly opened or edited issues based on the issue template choices (e.g. `has-pr-volunteer`, `mobile`, `frontend`, `backend`).
+
+**Triggers**: Issues (opened, edited)
+
+---
+
+#### `sync-translations.yml`
+
+**Purpose**: Bidirectional sync with [SparkyFitnessTranslations](https://github.com/CodeWithCJ/SparkyFitnessTranslations), the repository Weblate is connected to. Pushes the English sources out and pulls every other language back, opening one PR on each side (`i18n/update-english-locales` there, `i18n/sync-weblate-translations` here).
+
+Five Weblate components. The mobile app has four because its surfaces use different formats and placeholder rules (`{{value}}`, `%1$s`, `%@`), so Weblate translates each native file directly and no format conversion sits in between:
+
+| Component | In the translations repo | In this repo |
+| --- | --- | --- |
+| Web | `locales/` | `SparkyFitnessFrontend/public/locales/` |
+| Mobile runtime | `mobile/src/localization/locales/` | `SparkyFitnessMobile/src/localization/locales/` |
+| Mobile Expo metadata | `mobile/locales/` | `SparkyFitnessMobile/locales/` |
+| Mobile Android widgets | `mobile/targets/android-widget/res/` | `SparkyFitnessMobile/targets/android-widget/res/` |
+| Mobile iOS widgets | `mobile/targets/widget/` | `SparkyFitnessMobile/targets/widget/` |
+
+A mobile surface missing from the translations repo is skipped with a notice, so the workflow is safe to run before all the components exist; the push side seeds each English source on the first run. `pr-validation.yml` rejects a human PR that edits any non-`en` translation file.
+
+Only locales listed in `SparkyFitnessMobile/src/localization/localeRegistry.json` are shipped on mobile. Others sync in as translation candidates, are reported by the i18n audit as non-blocking diagnostics, and are never bundled. The widget resources are the exception to "sync in": Android compiles every `values-*` directory and the iOS widget target ships every `.lproj` folder, so those two surfaces are pulled for registered locales only and a candidate's widget arrives on the sync after it is registered.
+
+**Triggers**: Manual workflow dispatch only. Requires the `TRANSLATIONS_PAT` secret.
+
+---
+
+#### `auto-merge-bot-prs.yml`
+
+**Purpose**: Automatically and safely merges clean automated PRs for Translations (`i18n/*`) and Nix hashes (`nix/*`) once all CI checks pass. If there are any merge conflicts, the PR is held untouched for manual review.
+
+**Triggers**: Pull requests (opened, synchronize, labeled, ready_for_review), Check suites completed, and manual workflow dispatch
+
+---
+
+#### `first-contributor-welcome.yml`
+
+**Purpose**: Greets first-time contributors with a warm, tailored welcome comment when they open their very first pull request, feature request, or issue.
+
+**Triggers**: Issues opened, Pull requests opened
+
+---
+
+#### `pr-license-enforcement.yml`
+
+**Purpose**: Sweeps open pull requests on a schedule and closes PRs where the mandatory Integrity & License agreement checkbox was not confirmed within the 7-day grace period.
+
+**Triggers**: Scheduled (hourly) and manual workflow dispatch
+
+---
+
+#### `pr-merged-issue-notifier.yml`
+
+**Purpose**: When a PR is merged, automatically replies to linked issues informing reporters that the fix or enhancement is completed and will be available in the upcoming release.
+
+**Triggers**: Pull requests closed (`merged == true`)
+
+---
+
+#### `release-published-notifier.yml`
+
+**Purpose**: When a new release is published, automatically comments on all issues resolved in that release announcing that the release is now live with links to the release notes.
+
+**Triggers**: Release published (`published`)
+
+---
+
+## Development Notes
+
+### Testing Workflows Locally
+
+Run the PR validation regression tests with `pnpm install --filter . --frozen-lockfile --ignore-scripts` and `node --test .github/scripts/pr-validation.test.cjs`. The tests execute the workflow script with read-only review-event API fixtures and run in `pr-validation-tests.yml`.
+
+You can test GitHub Actions locally using [act](https://github.com/nektos/act):
+
+```bash
+# Install act
+brew install act  # macOS
+# or
+curl https://raw.githubusercontent.com/nektos/act/master/install.sh | sudo bash  # Linux
+
+# Test PR validation workflow
+act pull_request -e .github/workflows/test-event.json
+```
+
+### Modifying Workflows
+
+When modifying workflows:
+
+1. **Test before committing**: Use act or push to a feature branch
+2. **Update this README**: Document any significant changes
+3. **Check permissions**: Ensure the workflow has necessary permissions
+4. **Validate YAML**: Use `yamllint` or GitHub's workflow syntax validator
+5. **Consider impact**: Some workflows affect PR checks - be careful with breaking changes
+
+### Common Issues
+
+**Workflow not running:**
+
+- Check trigger conditions (paths, branches, events)
+- Verify workflow file is in `.github/workflows/`
+- Check YAML syntax is valid
+
+**Permission errors:**
+
+- Add required permissions in workflow file
+- Check repository settings allow Actions
+
+**Path filters not working:**
+
+- Use `dorny/paths-filter@v2` for complex path detection
+- Test path patterns with actual file changes
+
+## Maintenance
+
+This document should be updated when:
+
+- New workflows are added
+- Existing workflows are significantly modified
+- Trigger conditions change
+- Validation rules change
+
+Last updated: 2026-04-05
